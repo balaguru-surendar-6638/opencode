@@ -1186,6 +1186,14 @@ export namespace Config {
           },
         ),
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
+      projectInstructionMaxSize: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Maximum character size for instruction files (AGENTS.md, CLAUDE.md, etc.) before they are excluded from the system prompt. When a file exceeds this size, a short note is injected instead telling the agent to read it on demand.",
+        ),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
       tools: z.record(z.string(), z.boolean()).optional(),

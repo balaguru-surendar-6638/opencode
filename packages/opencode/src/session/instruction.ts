@@ -69,6 +69,18 @@ export namespace InstructionPrompt {
     state().claims.delete(messageID)
   }
 
+  async function lazy(filepath: string, raw: string): Promise<string | undefined> {
+    const cfg = await Config.get()
+    const max = cfg.projectInstructionMaxSize
+    if (!max || raw.length <= max) return raw
+    log.info("instruction file exceeds limit, deferring to on-demand read", {
+      filepath,
+      size: raw.length,
+      max,
+    })
+    return undefined
+  }
+
   export async function systemPaths() {
     const config = await Config.get()
     const paths = new Set<string>()
@@ -119,8 +131,17 @@ export namespace InstructionPrompt {
     const paths = await systemPaths()
 
     const files = Array.from(paths).map(async (p) => {
-      const content = await Filesystem.readText(p).catch(() => "")
-      return content ? "Instructions from: " + p + "\n" + content : ""
+      const raw = await Filesystem.readText(p).catch(() => "")
+      if (!raw) return ""
+      const text = await lazy(p, raw)
+      if (text) return "Instructions from: " + p + "\n" + text
+      return (
+        "Instructions from: " +
+        p +
+        "\n" +
+        `This instruction file is too large to include inline (${raw.length} chars). ` +
+        `Read it with the read tool when you need to reference project conventions: ${p}`
+      )
     })
 
     const urls: string[] = []
@@ -166,6 +187,7 @@ export namespace InstructionPrompt {
   }
 
   export async function resolve(messages: MessageV2.WithParts[], filepath: string, messageID: string) {
+    if (Flag.OPENCODE_DISABLE_PROJECT_CONFIG) return []
     const system = await systemPaths()
     const already = loaded(messages)
     const results: { filepath: string; content: string }[] = []
@@ -179,9 +201,22 @@ export namespace InstructionPrompt {
 
       if (found && found !== target && !system.has(found) && !already.has(found) && !isClaimed(messageID, found)) {
         claim(messageID, found)
-        const content = await Filesystem.readText(found).catch(() => undefined)
-        if (content) {
-          results.push({ filepath: found, content: "Instructions from: " + found + "\n" + content })
+        const raw = await Filesystem.readText(found).catch(() => undefined)
+        if (raw) {
+          const text = await lazy(found, raw)
+          if (text) {
+            results.push({ filepath: found, content: "Instructions from: " + found + "\n" + text })
+          } else {
+            results.push({
+              filepath: found,
+              content:
+                "Instructions from: " +
+                found +
+                "\n" +
+                `This instruction file is too large to include inline (${raw.length} chars). ` +
+                `Read it with the read tool when you need to reference project conventions: ${found}`,
+            })
+          }
         }
       }
       current = path.dirname(current)
